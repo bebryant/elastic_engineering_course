@@ -1,0 +1,15 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /data/suricata/eve.json
+  json.keys_under_root: true
+  fields:
+    kafka_topic: suricata-raw
+  fields_under_root: true
+output.kafka:
+  hosts: ["localhost:9092"]
+  topic: '%{[kafka_topic]}'
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 1000000

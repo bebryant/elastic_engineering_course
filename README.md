@@ -44,7 +44,7 @@ Zeek delivers the large volumes of high-quality data needed to provide comprehen
 
 ## install CentOS7
 1. Select `NETWORK & HOST NAME`
-  - change `Host name` in `NETWORK & HOST NAME`
+  - change `Host name` in `NETWORK & HOST NAME` :  `sg03.local.lan`
   - Select `configure` in `NETWORK & HOST NAME`
     - Select `IPv4 Settings` Tab inside `configure`
     - Change the `IPv4 Settings` to the above table
@@ -56,7 +56,7 @@ Zeek delivers the large volumes of high-quality data needed to provide comprehen
 1. go to `KDUMP`
   - deselect the checkbox of `Enable kdump` then select `done`
 1. Select `INSTALLATION DESTINATION`
-  - Select the disks to that you have a `black circle with white checkmark`
+  - Select the disks you are installing to, so that you have a `black circle with white checkmark`
   - check the box `I would like to make additional space available` under `Other Storage Options`
   - select `done` which will launch the `RECLAIM DISK SPACE` menu
   - select `Delete all` on the `RECLAIM DISK SPACE` menu
@@ -129,16 +129,48 @@ Zeek delivers the large volumes of high-quality data needed to provide comprehen
     - Select `Finish configuration` button  
 
 
-  navigate to `/etc/sysconfig/network-scripts`
+  navigate to `/etc/sysconfig/network-scripts` folder.
 
   `cd /etc/sysconfig/network-scripts`
 
   and type the following
 
-  `sudo vi ifcfg-emo1`
+  `sudo vi ifcfg-eno1`
 
-  change `ONBOOT=no` to `ONBOOT=yes`
+  vi will open the `ifcfg-eno1` file
+  press `I` to insert and use arrow keys to navigate inside document and change `ONBOOT=no` to `ONBOOT=yes`
 
+edit the `/etc/sysctl.conf` file to disable IPv6 for kafka to work properly
+- `sudo vim /etc/sysctl.conf`
+- add the following three lines to the bottom of the file:
+
+~~~
+# sysctl settings are defined through files in
+# /usr/lib/sysctl.d/, /run/sysctl.d/, and /etc/sysctl.d/.
+#
+# Vendors settings live in /usr/lib/sysctl.d/.
+# To override a whole file, create a new file with the same in
+# /etc/sysctl.d/ and put new settings there. To override
+# only specific settings, add a file with a lexically later
+# name in /etc/sysctl.d/ and put new settings there.
+#
+# For more information, see sysctl.conf(5) and sysctl.d(5).
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+~~~
+
+edit the `/etc/hosts` file to disable the localhost IP for IPv6 so that Kafka will function properly
+- `sudo vi /etc/hosts`
+  - delete the line ::1
+- The file will look like the following:
+
+~~~
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+~~~
+
+reset the network:
+- `sudo systemctl restart network`
 
 # pfSense
 
@@ -272,3 +304,328 @@ enabled=1
 gpgcheck=0
 ~~~
 - then run `sudo yum makecache`
+
+# Suricata
+1. Install Suricata on the NUC
+  - In the terminal, type `sudo yum install suricata`.
+
+2. Make changes to to `suricata.yaml` file
+  - type `sudo vi /etc/suricata/suricata.yaml` and press `enter`
+    - make the following changes to suricata.yaml
+
+  | Line | Section  | Setting |
+  | :--- | :--- |  :--- |
+  | | fast: | enabled: no |
+  | | eve-log: | enabled: yes |
+  | 580 | af-packet:| - interface: enp5s0 |
+
+  - you can use `/` to enter find mode in vi.  e.g. to find `af-packet:` section you would type `/ af-packet` and press enter.
+  - For CPU affinity changes to suricata.yaml
+    - `sudo cat /proc/cpuinfo | egrep -e 'processor|physical id|core id' | xargs -13`
+    - processor core 0 always has affinity to the OS.  NEVER pin CPU affinity on core 0 for anything other than the OS.  Otherwise the system will drastically bog down.
+
+3. Change the `/etc/sysconfig/suricata` configuration file
+  - type `sudo vi /etc/sysconfig/suricata` and press `enter`
+    - Make the following changes:
+      - `OPTIONS="--af-packet=enp5s0 --user suricata"`
+
+/etc/suricata/suricata
+~~~yaml      
+# -i <network interface device>
+# --user <acct name>
+# --group <group name>
+
+# Add options to be passed to the daemon
+OPTIONS="--af-packet=enp5s0 --user suricata"
+~~~
+
+4. Update suricata rules from repo
+  - type `sudo suricata-update add-source local-emerging-threats http://192.168.2.11:8009/suricata-5.0/emerging.rules.tar.gz` and press `enter`
+
+~~~bash
+[stu3@sg03 sysconfig]$ sudo suricata-update add-source local-emerging-threats http://192.168.2.11:8009/suricata-5.0/emer
+ging.rules.tar.gz
+11/2/2021 -- 19:07:57 - <Info> -- Using data-directory /var/lib/suricata.
+11/2/2021 -- 19:07:57 - <Info> -- Using Suricata configuration /etc/suricata/suricata.yaml
+11/2/2021 -- 19:07:57 - <Info> -- Using /usr/share/suricata/rules for Suricata provided rules.
+11/2/2021 -- 19:07:57 - <Info> -- Found Suricata version 5.0.1 at /sbin/suricata.
+11/2/2021 -- 19:07:57 - <Info> -- Creating directory /var/lib/suricata/update/sources
+[stu3@sg03 sysconfig]$
+~~~
+
+5. Starting Suricata
+- before starting suricata you need to set ownership of the `/data/suricata` folder
+  - type `sudo chown -R suricata: /data/suricata` and press `enter`
+- type `sudo systemctl restart suricata` and press `enter`
+
+6. Create/edit a logrotate configuration file for suricata
+  - type  `sudo vi /etc/logrotate.d/suricata.conf` and press enter
+    - paste the folling into the suricata.conf file
+
+~~~
+/data/suricata/*.log /data/suricata/*.json
+{
+  rotate 3
+  missingok
+  nocompress
+  create
+  sharedscripts
+  postrotate
+          /bin/kill -HUP $(cat /var/run/suricata.pid)
+  endscript
+}
+~~~
+
+# Zeek
+
+## Install Zeek
+  1. type `sudo yum install zeek zeek-plugin-kafka zeek-plugin-af_packet` and press `enter`
+   - confirm the install with `y`
+
+turn off zeek ASCII logs?
+
+`sudo vi /etc/zeek/network.cfg`
+
+local.zeek is where base scripts will load from. this allows you to modify them and not have to worry about updates/upgrades deleting your modifications to base scripts.
+
+`zeek-config` command lets you find the path of the different zeek directories.
+~~~
+[stu3@sg03 ~]$ zeek-config
+Usage: zeek-config [--version] [--build_type] [--prefix] [--script_dir] [--site_dir] [--plugin_dir] [--config_dir] [--python_dir] [--include_dir] [--cmake_dir] [--zeekpath] [--zeek_dist] [--binpac_root] [--caf_root] [--broker_root]
+[stu3@sg03 ~]$
+~~~
+
+Modify the zeekctl.cfg file
+- type `sudo vi /etc/zeek/zeekctl.cfg`
+- add the following to the bottom of the config file, save and exit
+~~~
+# This is a custom field that was added to allow af_packet support
+lb_custom.InterfacePrefix=af_packet::
+~~~
+- see the `zeelctl.cfg` file in the folder `Zeek Files` for an example
+
+
+Modify the node.cfg file
+- Note: worker - 1 core per 250Mbps (but really 100 Mbps)
+- type `sudo vi /etc/zeek/node.cfg`
+- add a # to the beginning of lines 8-11 to comment them out
+- delete the # to un-comment out lines 16-31
+- delete lines 33 to 36
+- see the `node.cfg` file in the folder `Zeek Files` for an example
+
+
+create `/usr/share/site` folder and `/usr/share/zeek/site/scripts` folder
+create `af_packet.zeek` in `/usr/share/zeek/site/scripts` folder and paste and save the following:
+~~~
+redef AF_Packet::fanout_id = strcmp(getenv("fanout_id"),"") == 0 ? 0 : to_count(getenv("fanout_id"));
+~~~
+
+Create `kafka.zeek` in `/usr/share/zeek/site/scripts` folder and paste and save the following:
+~~~
+@load Apache/Kafka/logs-to-kafka
+
+redef Kafka::topic_name = "zeek-raw";
+redef Kafka::json_timestamps = JSON::TS_ISO8601;
+redef Kafka::tag_json = F;
+redef Kafka::kafka_conf = table (
+  ["metadata.broker.list"] =
+   "172.16.30.100:9092"
+);
+
+
+event zeek_init() &priority=-5
+{
+    for (stream_id in Log::active_streams)
+    {
+        if (|Kafka::logs_to_send| == 0 || stream_id in Kafka::logs_to_send)
+        {
+            local filter: Log::Filter = [
+                $name = fmt("kafka-%s", stream_id),
+                $writer = Log::WRITER_KAFKAWRITER,
+                $config = table(["stream_id"] = fmt("%s", stream_id))
+            ];
+
+            Log::add_filter(stream_id, filter);
+        }
+    }
+}
+~~~
+- Note: see the `kafka.zeek` file in the folder `Zeek Files`
+
+Create `extension.zeek` in `/usr/share/zeek/site/scripts` folder and paste and save the following:
+~~~
+     type Extension: record {
+        ## The log stream that this log was written to.
+        stream:   string &log;
+        ## The name of the system that wrote this log. This
+        ## is defined in the  const so that
+        ## a system running lots of processes can give the
+        ## same value for any process that writes a log.
+        system:   string &log;
+        ## The name of the process that wrote the log. In
+        ## clusters, this will typically be the name of the
+        ## worker that wrote the log.
+        proc:     string &log;
+    };
+
+    function add_log_extension(path: string): Extension
+    {
+        return Extension($stream = path,
+                         $system = "sensor1",
+                         $proc   = peer_description);
+    }
+
+    redef Log::default_ext_func   = add_log_extension;
+    redef Log::default_ext_prefix = "@";
+    redef Log::default_scope_sep  = "_";
+~~~
+
+
+open `/usr/share/zeek/site/local.zeek`
+append the following to end of the file
+~~~
+@load ./scripts/kafka.zeek
+@load ./scripts/af_packet.zeek
+@load ./scripts/extension.zeek
+~~~
+
+
+# Install Stenographer
+
+`sudo yum install stenographer`
+
+`sudo vi /etc/stenographer/config`
+cut, paste and save the following:
+~~~
+{
+  "Threads": [
+    { "PacketsDirectory": "/data/stenographer/directory"
+    , "IndexDirectory": "/data/stenographer/directory"
+    , "MaxDirectoryFiles": 30000
+    , "DiskFreePercentage": 10
+    }
+  ]
+  , "StenotypePath": "/usr/bin/stenotype"
+  , "Interface": "enp5s0"
+  , "Port": 1234
+  , "Host": "127.0.0.1"
+  , "Flags": []
+  , "CertPath": "/etc/stenographer/certs"
+}
+~~~
+
+
+# Install kafka
+- must install zookeeper too.
+
+1. `sudo yum install zookeeper kafka`
+
+2. `sudo vi /etc/zookeeper/zoo.cfg`
+
+3. `sudo vi /etc/kafka/server.properties`
+
+- un-comment 31 add your sensors IP address
+  - `listeners=PLAINTEXT://172.16.30.100:9092`
+- un-comment line 36 and add  your sensor IP address.
+  - `advertised.listeners=PLAINTEXT://172.16.30.100:9092`
+- change line 65 to number of partitions you want
+  - `num.partitions=3`
+- change `log.dirs=` to the location you are storing data too.
+  - `log.dirs=/data/kafka`  
+- un-comment and change `log.retention.bytes` to close to but less that your size of your hard drive space.
+  - `log.retention.bytes=7374182400`
+- Note: `broker.id=` is changed if your doing kafka clusters. Assign a different `broker.id=` to each kafka machine in the cluster.  e.g.  `broker.id=1`, `broker.id=2`, `broker.id=3` for 3 kafka cluster.
+
+4. set up firewalld settings to allow ports that Kafka uses.
+  - `sudo firewall-cmd --add-port=2181/tcp --permanent`
+  - `sudo firewall-cmd --add-port=9092/tcp --permanent`
+  -  For a kafka cluster you would need to add port 2182 and port 2183
+
+/usr/share/kafka/config/producer.properties
+- change the `bootstrap.servers=` to your IP of your kafka server
+  - `bootstrap.servers=172.16.30.100:9092`
+
+/usr/share/kafka/config/consumer.properties  
+- change the `bootstrap.servers=` to your IP of your kafka server
+  - `bootstrap.servers=172.16.30.100:9092`
+
+run the below script to see the kafka partition/topic stucture.
+- `sudo /usr/share/kafka/bin/kafka-topics.sh --bootstrap-server 172.16.30.100:9092 --list`
+- `sudo /usr/share/kafka/bin/kafka-topics.sh --bootstrap-server 172.16.30.100:9092 --describe --topic zeek-raw`
+- `sudo /usr/share/kafka/bin/kafka-topics.sh --bootstrap-server 172.16.30.100:9092 --describe --topic suricata-raw`
+
+
+
+To wipe everything and reset from scratch:
+~~~
+sudo systemctl stop kafka zookeeper
+sudo rm -rf  /var/lib/zookeeper/version-2/
+sudo rm -rf  /data/kafka/*
+sudo systemctl start zookeeper kafka
+~~~
+
+To test kafka data/topics
+~~~
+ /usr/share/kafka/bin/kafka-console-producer.sh  --broker-list 172.16.30.100:9092 --topic test`
+ /usr/share/kafka/bin/kafka-console-consumer.sh  --bootstrap-server 172.16.30.100:9092 --topic test --from-beginning`
+~~~
+
+Install filebeat
+- `sudo yum install filebeat`
+- `sudo vi /etc/filebeat/filebeat.yml`
+
+add the following at line 16
+~~~
+- type: log
+    enabled: true
+    paths:
+      - /data/suricata/eve.json
+    json.keys_under_root: true
+    fields:
+      kafka_topic: suricata-raw
+    fields_under_root: true
+~~~
+
+comment out the `Elasticsearch Output` Section
+
+add a kafka output Section at line 182
+
+~~~
+output.kafka:
+  hosts: ["localhost:9092"]
+  topic: '%{[kafka_topic]}'
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 1000000
+~~~
+
+
+### To create kafka clustser
+1. Shutdown kafka and zookeeper
+ - `sudo systemctl stop kafka zookeeper`
+
+1. clean up old kafka data and zookeeper data
+ - `sudo rm -rf  /var/lib/zookeeper/version-2/`
+ - `sudo rm -rf  /data/kafka/*`
+1. create `myid` file and type any number to set the id
+  - `sudo vim /var/lib/zookeeper/myid`
+1. add the following to the bottom of the zoo.cfg
+    ~~~
+    server.1=172.16.10.100:2182:2183
+    server.2=172.16.20.100:2182:2183
+    server.3=172.16.30.100:2182:2183
+    server.4=172.16.40.100:2182:2183
+    server.5=172.16.50.100:2182:2183
+    server.6=172.16.60.100:2182:2183
+    server.7=172.16.70.100:2182:2183
+    ~~~
+
+1. change firewall rules
+    - `sudo firewall-cmd --add-port=2182/tcp --permanent`
+    - `sudo firewall-cmd --add-port=2183/tcp --permanent`
+
+1. change kafka/server.properties
+    - add the cluster IPs to `zookeeper.connect=`
+    ~~~
+zookeeper.connect=172.16.10.100:2181,172.16.20.100:2181,172.16.30.100:2181,172.16.40.100:2181,172.16.50.100:2181,172.16.60.100:2181,172.16.70.100:2181
+    ~~~
