@@ -626,6 +626,7 @@ output.kafka:
 
 1. change kafka/server.properties
     - add the cluster IPs to `zookeeper.connect=`
+    
     ~~~
 zookeeper.connect=172.16.10.100:2181,172.16.20.100:2181,172.16.30.100:2181,172.16.40.100:2181,172.16.50.100:2181,172.16.60.100:2181,172.16.70.100:2181
     ~~~
