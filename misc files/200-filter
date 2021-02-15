@@ -1,0 +1,18 @@
+filter {
+
+  if "zeek-http" in [@metadata][tags] {
+
+    mutate {
+
+      rename => {
+                "[id_orig_h]" => "[source][address]"
+                "[id_orig_p]" => "[source][port]"
+                "[id_resp_h]" => "[destination][address]"
+                "[id_resp_p]" => "[source][port]"
+                "[status_code]" => "[http][response][status_code]"
+                "[version]" => "[http][version]"
+
+                }
+           }
+                                      }
+       }

@@ -520,9 +520,8 @@ cut, paste and save the following:
 
 1. `sudo yum install zookeeper kafka`
 
-2. `sudo vi /etc/zookeeper/zoo.cfg`
 
-3. `sudo vi /etc/kafka/server.properties`
+1. `sudo vi /etc/kafka/server.properties`
 
 - un-comment 31 add your sensors IP address
   - `listeners=PLAINTEXT://172.16.30.100:9092`
@@ -536,16 +535,16 @@ cut, paste and save the following:
   - `log.retention.bytes=7374182400`
 - Note: `broker.id=` is changed if your doing kafka clusters. Assign a different `broker.id=` to each kafka machine in the cluster.  e.g.  `broker.id=1`, `broker.id=2`, `broker.id=3` for 3 kafka cluster.
 
-4. set up firewalld settings to allow ports that Kafka uses.
+1. set up firewalld settings to allow ports that Kafka uses.
   - `sudo firewall-cmd --add-port=2181/tcp --permanent`
   - `sudo firewall-cmd --add-port=9092/tcp --permanent`
   -  For a kafka cluster you would need to add port 2182 and port 2183
 
-/usr/share/kafka/config/producer.properties
+1. Modify the `/usr/share/kafka/config/producer.properties` file
 - change the `bootstrap.servers=` to your IP of your kafka server
   - `bootstrap.servers=172.16.30.100:9092`
 
-/usr/share/kafka/config/consumer.properties  
+1. Modify the `/usr/share/kafka/config/consumer.properties` file  
 - change the `bootstrap.servers=` to your IP of your kafka server
   - `bootstrap.servers=172.16.30.100:9092`
 
@@ -609,7 +608,7 @@ output.kafka:
  - `sudo rm -rf  /data/kafka/*`
 1. create `myid` file and type any number to set the id
   - `sudo vim /var/lib/zookeeper/myid`
-1. add the following to the bottom of the zoo.cfg
+1. add the following to the bottom of the `/etc/zookeeper/zoo.cfg`
     ~~~
     server.1=172.16.10.100:2182:2183
     server.2=172.16.20.100:2182:2183
@@ -624,9 +623,28 @@ output.kafka:
     - `sudo firewall-cmd --add-port=2182/tcp --permanent`
     - `sudo firewall-cmd --add-port=2183/tcp --permanent`
 
-1. change kafka/server.properties
+1. change `/etc/kafka/server.properties`
     - add the cluster IPs to `zookeeper.connect=`
-    
+
     ~~~
 zookeeper.connect=172.16.10.100:2181,172.16.20.100:2181,172.16.30.100:2181,172.16.40.100:2181,172.16.50.100:2181,172.16.60.100:2181,172.16.70.100:2181
     ~~~
+
+
+# Logstash
+1. install Logstash
+  - `sudo yum install logstash -y`
+1. modify the `/etc/logstash/startup.options` file
+  - un-comment the `JAVACMD=/usr/bin/java` line to allow logstash to use the previously installed java that was installed with kafka.
+1. modify HEAP settings in `/etc/logstash/jvm.options`
+  - under JVM Configuration header change `-Xms1g` and `-Xmx1g` to a value larger than `1g` based on your production hardware.  Make both values equal to each other.
+1.
+
+~~~
+sudo /usr/share/kafka/bin/kafka-console-consumer.sh --bootstrap-server 172.16.1.100:9092 --topic zeek-raw --from-begining | grep http > http.log
+~~~
+
+
+~~~
+sudo /usr/share/logstash/bin/logstash  --path.settings /etc/logstash
+~~~
