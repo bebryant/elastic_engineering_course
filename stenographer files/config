@@ -1,0 +1,15 @@
+{
+  "Threads": [
+    { "PacketsDirectory": "/data/stenographer/packets"
+    , "IndexDirectory": "/data/stenographer/index"
+    , "MaxDirectoryFiles": 30000
+    , "DiskFreePercentage": 10
+    }
+  ]
+  , "StenotypePath": "/usr/bin/stenotype"
+  , "Interface": "enp5s0"
+  , "Port": 1234
+  , "Host": "127.0.0.1"
+  , "Flags": []
+  , "CertPath": "/etc/stenographer/certs"
+}
