@@ -783,10 +783,12 @@ sudo vim /etc/elasticsearch/elasticsearch.yml
 1. Create `/etc/systemd/system/elasticsearch.service.d/override.conf` files
 - `sudo vim /etc/systemd/system/elasticsearch.service.d/override.conf`
 - add the following to `override.conf`
+
   ~~~
 [Service]
 LimitMEMLOCK=infinity
   ~~~
+  
 - `sudo chmod 644 /etc/systemd/system/elasticsearch.service.d/override.conf`  
 
 1. open `/etc/elasticsearch/jvm.options` file
@@ -844,4 +846,4 @@ modify `/ecs-configuration/elasticsearch/default.json`
 - `sudo vim /ecs-configuration/elasticsearch/default.json`
  - change `"order": 0,` to `"order": 5,`
 
- sudo 
+ sudo
