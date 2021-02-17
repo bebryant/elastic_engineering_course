@@ -376,6 +376,22 @@ ging.rules.tar.gz
 }
 ~~~
 
+Install filebeat
+- `sudo yum install filebeat`
+- `sudo vi /etc/filebeat/filebeat.yml`
+
+add the following at line 16
+~~~
+- type: log
+    enabled: true
+    paths:
+      - /data/suricata/eve.json
+    json.keys_under_root: true
+    fields:
+      kafka_topic: suricata-raw
+    fields_under_root: true
+~~~
+
 # Zeek
 
 ## Install Zeek
@@ -569,21 +585,7 @@ To test kafka data/topics
  /usr/share/kafka/bin/kafka-console-consumer.sh  --bootstrap-server 172.16.30.100:9092 --topic test --from-beginning`
 ~~~
 
-Install filebeat
-- `sudo yum install filebeat`
-- `sudo vi /etc/filebeat/filebeat.yml`
 
-add the following at line 16
-~~~
-- type: log
-    enabled: true
-    paths:
-      - /data/suricata/eve.json
-    json.keys_under_root: true
-    fields:
-      kafka_topic: suricata-raw
-    fields_under_root: true
-~~~
 
 comment out the `Elasticsearch Output` Section
 
@@ -630,6 +632,10 @@ output.kafka:
 zookeeper.connect=172.16.10.100:2181,172.16.20.100:2181,172.16.30.100:2181,172.16.40.100:2181,172.16.50.100:2181,172.16.60.100:2181,172.16.70.100:2181
     ~~~
 
+## Kafka testing
+- `sudo /usr/share/kafka/bin/kafka-topics.sh --bootstrap-server 172.16.30.100:9092 --list`
+- `sudo /usr/share/kafka/bin/kafka-console-consumer.sh --bootstrap-server 172.16.30.100:9092 --topic zeek-raw`
+- `sudo /usr/share/kafka/bin/kafka-console-consumer.sh --bootstrap-server 172.16.30.100:9092 --topic suricata-raw`
 
 # Logstash
 1. install Logstash
@@ -638,13 +644,204 @@ zookeeper.connect=172.16.10.100:2181,172.16.20.100:2181,172.16.30.100:2181,172.1
   - un-comment the `JAVACMD=/usr/bin/java` line to allow logstash to use the previously installed java that was installed with kafka.
 1. modify HEAP settings in `/etc/logstash/jvm.options`
   - under JVM Configuration header change `-Xms1g` and `-Xmx1g` to a value larger than `1g` based on your production hardware.  Make both values equal to each other.
-1.
+1. Create file to Filter
 
-~~~
-sudo /usr/share/kafka/bin/kafka-console-consumer.sh --bootstrap-server 172.16.1.100:9092 --topic zeek-raw --from-begining | grep http > http.log
-~~~
+  ~~~
+sudo /usr/share/kafka/bin/kafka-console-consumer.sh --bootstrap-server 172.16.1.100:9092 --topic zeek-raw --from-begining | grep http > my-http.json
+  ~~~
+
+1. create `/etc/logstash/conf.d/000-input.conf` file
+  ~~~
+######################
+### 000-input.conf ###
+######################
+input {
+    file {
+        path => "/etc/logstash/conf.d/my-http.json"
+        add_field => { "[@metadata][tags]" => "zeek-http" }
+        start_position => "beginning"
+        sincedb_path => "/dev/null"
+    }
+}
+  ~~~
+
+1. create `/etc/logstash/conf.d/999-output.conf` file
+  ~~~
+#######################
+### 999-output.conf ###
+#######################
+output{
+
+ stdout {}
+
+ }
+ ~~~
+
+1. create `/etc/logstash/conf.d/200-filter.conf` file
+
+  ~~~
+#######################
+### 200-filter.conf ###
+#######################
+filter {
+
+  if "zeek-http" in [@metadata][tags] {
+
+    mutate {
+
+      rename => {
+                "[id_orig_h]" => "[source][address]"
+                "[id_orig_p]" => "[source][port]"
+                "[id_resp_h]" => "[destination][address]"
+                "[id_resp_p]" => "[source][port]"
+                "[status_code]" => "[http][response][status_code]"
+                "[version]" => "[http][version]"
+
+                }
+           }
+                                      }
+       }
+  ~~~
 
 
-~~~
-sudo /usr/share/logstash/bin/logstash  --path.settings /etc/logstash
-~~~
+1. run the following command to filter the my-http.json file
+- `sudo /usr/share/logstash/bin/logstash  --path.settings /etc/logstash`
+
+1. stop Logstash
+- `sudo systemctl stop logstash`
+
+1. navigate to `conf.d` folder
+  - `cd /etc/logstash/conf.d`
+
+1. remove all files in `/conf.d/` folder
+  - `ls`
+  - `sudo rm *`
+  - to verify:
+    - `ls`
+
+1. download logstash.tar.gz from class repo
+- `cd /etc/logstash/`
+- `sudo curl -L -O http://192.168.2.11:8009/logstash.tar.gz`
+- extract the file:
+  - `sudo tar xvzf logstash.tar.gz`
+- validate that the new files are in the `conf.d` folder  
+  - `ls conf.d`
+- once it's validated that the new files are in that folder, you can delete the tarball.
+  - `sudo rm logstash.tar.gz`
+
+1. navigate to `conf.d` folder
+  - `cd /etc/logstash/conf.d`
+
+1. remove fsf Files
+  - `ls *fsf*`
+  - `sudo rm -rf *fsf*`
+  - to verify:
+    - `ls *fsf*`
+
+1. verify/change settings in `/etc/logstash/conf.d/logstash-100-input-kafka-suricata.conf`
+- `sudo vim logstash-100-input-kafka-suricata.conf`
+- check topic is correct. e.g. suricata-raw
+- change `bootstrap_servers => "127.0.0.1:9092"` to `bootstrap_servers => "172.16.30.100:9092"`
+
+1. verify/change settings in `logstash-100-input-kafka-zeek.conf`
+- `sudo vim logstash-100-input-kafka-zeek.conf`
+- check topic is correct e.g. zeek-raw
+- change `bootstrap_servers => "127.0.0.1:9092"` to `bootstrap_servers => "172.16.30.100:9092"`
+
+1. verify/change settings in `/etc/logstash/conf.d/logstash-9999-output-elasticsearch.conf`
+  - `sudo vim logstash-9999-output-elasticsearch.conf`
+  - comment out `stdout { codec => json }`
+  - change all `hosts => [ "127.0.0.1" ]` to `hosts => [ "172.16.30.100" ]`
+    - press `ESC` then `:` and type `:%s/127.0.0.1/172.16.30.100/g`
+
+1. Check logstash config for errors
+- `sudo /usr/share/logstash/bin/logstash -t -f /etc/logstash/conf.d/ --path.settings=/etc/logstash`
+
+1. start Logstash
+  - `sudo systemctl start logstash`
+
+# Elasticsearch
+
+sudo chown elasticsearch:elasticsearch /data/elasticsearch
+sudo chmod 755 /data/elasticsearch
+
+sudo vim /etc/elasticsearch/elasticsearch.yml
+
+- un-comment `#cluster.name: my-application` and change to `cluster.name: sg03`
+- un-comment `#node.name: node-1` and change to `node.name: node-sg03`
+- change `path.data: /var/lib/elasticsearch` to `path.data: /data/elasticsearch`
+- un-comment `#bootstrap.memory_lock: true`
+- un-comment `#network.host: 192.168.0.1` and change to `network.host: 172.16.30.100`
+- add line `discovery.type: single-node` to the bottome of the `discovery` section
+
+[see Elasticsearch Files/elasticsearch.yml]
+
+1. create directory
+- `sudo mkdir /etc/systemd/system/elasticsearch.service.d`
+- `sudo chmod 755 /etc/systemd/system/elasticsearch.service.d`
+
+1. Create `/etc/systemd/system/elasticsearch.service.d/override.conf` files
+- `sudo vim /etc/systemd/system/elasticsearch.service.d/override.conf`
+- add the following to `override.conf`
+  ~~~
+[Service]
+LimitMEMLOCK=infinity
+  ~~~
+- `sudo chmod 644 /etc/systemd/system/elasticsearch.service.d/override.conf`  
+
+1. open `/etc/elasticsearch/jvm.options` file
+- `sudo vim /etc/elasticsearch/jvm.options`
+- change `-Xms1g` to `-Xms4g`
+- change `-Xmx1g` to `-Xmx4g`
+
+1. Change firewall Settings and reload
+- `sudo firewall-cmd --add-port={9200,9300}/tcp --permanent`
+- `sudo firewall-cmd --reload`
+- to verfiy firewall Settings
+  - `sudo firewall-cmd --list-all`
+
+1. Start Elasticsearch
+- `sudo systemctl start elasticsearch`  
+
+# Kibana
+- Note: Kibana stores all the vizualizations/dashboards/canvas' to elasticsearch.  If you delete the data in elasticsearch you will lose your Kibana vizualizations/dashboards/canvas'.
+
+1. Install Kibana
+- `sudo yum install kibana -y`
+
+2. create `/etc/kibana/kibana.yml` file
+- `sudo vim /etc/kibana/kibana.yml`
+- un-comment and change `#server.host: "localhost"` to `server.host: "172.16.30.100"`
+- un-comment and change `#server.name: "your-hostname"` to `#server.name: "sg03"`
+- un-comment and change `#elasticsearch.hosts: ["http://localhost:9200"]` to `#elasticsearch.hosts: ["http://172.16.30.100:9200"]`
+
+3. Change firewall settings to allow port 5601 for Kibana to function
+  - `sudo firewall-cmd --add-port=5601/tcp --permanent`
+  - `sudo firewall-cmd --reload`
+  - to verfiy firewall Settings
+    - `sudo firewall-cmd --list-all`
+
+4. Start kibana and verify is is working
+  - `sudo systemctl start kibana`
+  - `sudo systemctl status kibana`
+
+5. Go to Kibana on browser
+- open browser and type `http://172.16.30.100:5601/`
+- disable kibana telemetry
+  -  go to `http://172.16.30.100:5601/app/management/kibana/settings`
+  - type `"telemetry"` in the search bar
+  - toggle `telemetry` to `off`
+- go to DEV Tools tab
+  - type `GET _cat/indices` and click on the `"play"` button
+  - you should have indices for `suricata-raw` and `zeek-raw`
+
+---
+
+- `curl -L -O http://192.168.2.11:8009/ecskibana.tar.gz`
+- `tar xzvf esckibana.tar.gz`
+
+modify `/ecs-configuration/elasticsearch/default.json`
+- `sudo vim /ecs-configuration/elasticsearch/default.json`
+ - change `"order": 0,` to `"order": 5,`
+
+ sudo 
